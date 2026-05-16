@@ -1,0 +1,32 @@
+# Environment
+.env
+
+# Claude Code
+.claude/
+.venv/
+venv/
+env/
+
+# Runtime data (never commit)
+data/
+logs/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
