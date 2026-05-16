@@ -202,7 +202,7 @@ async def cmd_cached(message: Message, ctx: AppContext):
 
     # Direct recipient filter: /cached שם
     if arg and arg.lower() not in _RECIPIENT_KEYWORDS:
-        rows = await ctx.store.get_active()
+        rows = await ctx.store.get_cached()
         if not rows:
             await message.answer("אין הזמנות במסד הנתונים המקומי.")
             return
@@ -225,7 +225,7 @@ async def cb_cached(call: CallbackQuery, ctx: AppContext, state: FSMContext):
         return
 
     await call.message.edit_text("טוען הזמנות…")
-    rows = await ctx.store.get_active()
+    rows = await ctx.store.get_cached()
     if not rows:
         await call.message.edit_text("אין הזמנות במסד הנתונים המקומי.")
         return
@@ -249,7 +249,7 @@ async def cb_cached_recipient_name(message: Message, ctx: AppContext, state: FSM
         await message.answer("לא הוזן שם.")
         return
 
-    rows = await ctx.store.get_active()
+    rows = await ctx.store.get_cached()
     orders = _rows_to_orders(rows) if rows else []
     translations = await translate_orders(orders, ctx.store)
     reply = format_order_list(orders, translations=translations, recipient_filter=name)
@@ -301,6 +301,7 @@ def _rows_to_orders(rows: dict) -> list:
             seller=r.get("seller"),
             recipient=r.get("recipient"),
             sub_status=r.get("sub_status"),
+            completed_at=datetime.fromisoformat(r["completed_at"]) if r.get("completed_at") else None,
         )
         for r in rows.values()
     ]

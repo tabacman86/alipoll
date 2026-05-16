@@ -31,6 +31,8 @@ def format_order(order: Order, highlight: str | None = None, item_name_he: str |
         lines.append(f"Recipient: {_esc(order.recipient)}")
     if order.order_date:
         lines.append(f"Order date: {order.order_date.strftime('%d/%m/%Y')}")
+    if order.completed_at:
+        lines.append(f"Completed: {order.completed_at.strftime('%d/%m/%Y')}")
     if order.tracking_number:
         lines.append(f"Tracking: <code>{_esc(order.tracking_number)}</code>")
     if order.estimated_delivery:

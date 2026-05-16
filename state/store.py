@@ -9,6 +9,7 @@ from scraper.models import Order
 logger = logging.getLogger(__name__)
 
 _COMPLETED_ARCHIVE_DAYS = 14
+_CACHED_ARCHIVE_DAYS = 30
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS orders (
@@ -84,6 +85,20 @@ class OrderStateStore:
                 rows = await cursor.fetchall()
         return {row["order_id"]: dict(row) for row in rows}
 
+    async def get_cached(self) -> dict[str, dict]:
+        """All non-cancelled orders; completed ones only within the last 30 days."""
+        cutoff = (datetime.utcnow() - timedelta(days=_CACHED_ARCHIVE_DAYS)).isoformat()
+        async with aiosqlite.connect(self._db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT * FROM orders
+                   WHERE lower(status) NOT IN ('cancelled', 'canceled', 'closed')
+                     AND (lower(status) NOT IN ('completed', 'delivered') OR completed_at > ?)""",
+                (cutoff,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        return {row["order_id"]: dict(row) for row in rows}
+
     async def upsert(self, order: Order) -> str | None:
         """Insert or update. Returns previous status if changed, else None."""
         now = datetime.utcnow().isoformat()
@@ -97,11 +112,12 @@ class OrderStateStore:
             old_completed_at = existing[1] if existing else None
             status_changed = old_status is not None and old_status != order.status
 
-            # Record when an order first becomes Completed
+            # Record when an order first becomes Completed or Delivered
+            _done = {"completed", "delivered"}
             new_completed_at = old_completed_at
-            if order.status.lower() == "completed" and not old_completed_at:
+            if order.status.lower() in _done and not old_completed_at:
                 new_completed_at = now
-            elif order.status.lower() != "completed":
+            elif order.status.lower() not in _done:
                 new_completed_at = None  # reset if re-opened
 
             await db.execute(

@@ -81,6 +81,7 @@ class Order:
     seller: str | None = None
     recipient: str | None = None
     sub_status: str | None = None
+    completed_at: datetime | None = None
     thumbnail_url: str | None = None
     last_seen: datetime = field(default_factory=datetime.utcnow)
 
