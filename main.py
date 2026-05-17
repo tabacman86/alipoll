@@ -202,7 +202,7 @@ async def run_bot():
     from aiogram import Bot, Dispatcher
     from aiogram.fsm.storage.memory import MemoryStorage
 
-    from bot.handlers import AppContext, AppContextMiddleware, router, register_commands
+    from bot.handlers import AppContext, AppContextMiddleware, WhitelistMiddleware, router, register_commands
     from scheduler.polling import PollingScheduler
     from scraper.aliexpress import AliExpressScraper
     from scraper.browser import BrowserManager
@@ -235,6 +235,7 @@ async def run_bot():
         chat_ids=settings["chat_ids"],
         scrape_lock=asyncio.Lock(),
     )
+    dp.update.middleware(WhitelistMiddleware(settings["chat_ids"]))
     dp.update.middleware(AppContextMiddleware(ctx))
     dp.include_router(router)
 

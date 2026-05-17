@@ -56,6 +56,24 @@ class AppContextMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 
+class WhitelistMiddleware(BaseMiddleware):
+    def __init__(self, allowed_chat_ids: list[int]):
+        self._allowed = set(allowed_chat_ids)
+
+    async def __call__(self, handler, event, data):
+        # event is an aiogram Update object when registered on dp.update
+        chat_id = None
+        if event.message:
+            chat_id = event.message.chat.id
+        elif event.callback_query and event.callback_query.message:
+            chat_id = event.callback_query.message.chat.id
+
+        if chat_id is not None and chat_id not in self._allowed:
+            logger.warning("Blocked unauthorized chat_id=%s", chat_id)
+            return
+        return await handler(event, data)
+
+
 @router.message(Command("start"))
 async def cmd_start(message: Message, ctx: AppContext):
     await message.answer(
