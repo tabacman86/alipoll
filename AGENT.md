@@ -18,7 +18,6 @@ Deployed as a Docker container. Re-authentication is done via `/relogin` in Tele
 main.py                   # Entry point — asyncio.run(run_bot()) only
 Dockerfile
 docker-compose.yml        # Project-level compose (for standalone use)
-/opt/docker_home/docker-compose.yml  # Server-wide compose (production)
 requirements.txt
 .env                      # Never committed — see .env.example
 
@@ -120,7 +119,7 @@ All UI strings are **Hebrew**. Item names are translated via Google Translate (`
 
 - `data/cookies.json` — Playwright session cookies, chmod 600, gitignored
 - `data/orders.db` — SQLite, gitignored
-- Both mounted as a Docker volume from `/opt/aliexpress/data/`
+- Mount `data/` as a Docker volume if you want cookies and SQLite state to persist outside the container.
 
 ---
 
@@ -144,18 +143,14 @@ Session expiry during polling triggers an automatic Telegram notification to all
 
 ```bash
 # Build and start
-docker compose -f /opt/docker_home/docker-compose.yml up -d --build aliexpress-bot
+docker compose up -d --build
 
 # Logs
-docker logs aliexpress-bot -f
+docker compose logs -f
 
 # Restart only (no rebuild)
-docker compose -f /opt/docker_home/docker-compose.yml restart aliexpress-bot
+docker compose restart
 ```
-
-The project-level `docker-compose.yml` is for standalone use. Production uses `/opt/docker_home/docker-compose.yml`.
-
-Volumes: `/opt/aliexpress/data` → `/app/data`, `/opt/aliexpress/logs` → `/app/logs`
 
 ---
 
