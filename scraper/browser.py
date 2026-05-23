@@ -167,14 +167,16 @@ class BrowserManager:
         if not await self.is_session_valid():
             raise SessionExpiredError("AliExpress session expired. Run: python main.py --login")
 
-    async def run_login_flow(self) -> None:
-        """Open a headed browser, wait for the user to complete Google OAuth."""
+    async def run_login_flow(self, use_stdin: bool = True) -> None:
+        """Open a headed browser, wait for the user to complete Google OAuth.
+
+        use_stdin=False skips the stdin fallback (required in Docker/Telegram context
+        where stdin is closed and would fire immediately with EOFError).
+        """
         import asyncio as _asyncio
         page = await self._context.new_page()
         logger.info("Opening AliExpress orders page — please complete login in the browser window.")
         await page.goto(LOGIN_URL, wait_until="domcontentloaded")
-        print("\nPlease log in to AliExpress in the browser window.")
-        print("Waiting for orders page (or press Enter here to save cookies manually)...\n")
 
         auto_done = _asyncio.Event()
         seen_login = False
@@ -189,17 +191,16 @@ class BrowserManager:
 
         page.on("framenavigated", _on_url_change)
 
-        # Also accept manual Enter press
-        def _stdin_reader():
-            try:
-                input()
-            except Exception:
-                pass
-            auto_done.set()
-
-        import threading
-        t = threading.Thread(target=_stdin_reader, daemon=True)
-        t.start()
+        if use_stdin:
+            # CLI fallback: pressing Enter also completes the flow
+            import threading
+            def _stdin_reader():
+                try:
+                    input()
+                except Exception:
+                    pass
+                auto_done.set()
+            threading.Thread(target=_stdin_reader, daemon=True).start()
 
         try:
             await _asyncio.wait_for(auto_done.wait(), timeout=300)
@@ -207,10 +208,15 @@ class BrowserManager:
             raise RuntimeError("Login timed out after 5 minutes.")
         finally:
             page.remove_listener("framenavigated", _on_url_change)
+            # Wait for network to settle so all auth cookies are written
+            try:
+                await page.wait_for_load_state("networkidle", timeout=5_000)
+            except Exception:
+                pass
             await page.close()
 
         await self.save_cookies()
-        print("Login successful. Cookies saved to", self._cookies_path)
+        logger.info("Login successful. Cookies saved to %s", self._cookies_path)
 
     async def reload_cookies(self) -> None:
         """Clear current cookies and reload from disk — call after a re-login."""

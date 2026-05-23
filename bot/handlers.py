@@ -333,7 +333,7 @@ async def cmd_relogin(message: Message, ctx: AppContext):
             login_mgr = BrowserManager()
             await login_mgr.start(headless=False)
             try:
-                await login_mgr.run_login_flow()
+                await login_mgr.run_login_flow(use_stdin=False)
             finally:
                 await login_mgr.stop()
 
