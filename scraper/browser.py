@@ -2,6 +2,8 @@ import json
 import logging
 import os
 import re
+import subprocess
+import time
 from pathlib import Path
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Playwright
@@ -9,6 +11,82 @@ from playwright.async_api import async_playwright, Browser, BrowserContext, Play
 from scraper.models import SessionExpiredError, CloudflareBlockError
 
 logger = logging.getLogger(__name__)
+
+
+def _write_novnc_index(directory: Path, vnc_port: int) -> None:
+    """Copy system noVNC files into directory, or write a placeholder."""
+    for p in [Path("/usr/share/novnc"), Path("/usr/share/webapps/novnc"), Path("/opt/novnc")]:
+        if (p / "vnc.html").exists():
+            import shutil as _shutil
+            for item in p.iterdir():
+                dest = directory / item.name
+                if not dest.exists():
+                    if item.is_dir():
+                        _shutil.copytree(item, dest)
+                    else:
+                        _shutil.copy2(item, dest)
+            return
+    (directory / "vnc.html").write_text(
+        "<p style='color:white;font-family:sans-serif;padding:20px'>"
+        "noVNC not found — install with: <code>sudo apt-get install novnc</code></p>"
+    )
+
+
+class NoVNCStack:
+    """
+    Starts Xvfb + x11vnc + websockify so the user can log in via a browser
+    over an SSH tunnel.  Use as a context manager (sync or via run_in_thread).
+
+    with NoVNCStack() as vnc:
+        # vnc.novnc_port is available
+        ...
+    """
+    DISPLAY = ":20"
+    VNC_PORT = 5900
+    NOVNC_PORT = 6080
+
+    def __enter__(self):
+        self._procs: list[subprocess.Popen] = []
+
+        xvfb = subprocess.Popen(
+            ["Xvfb", self.DISPLAY, "-screen", "0", "1280x800x24", "-nolisten", "tcp"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        self._procs.append(xvfb)
+        time.sleep(1)
+
+        x11vnc = subprocess.Popen(
+            ["x11vnc", "-display", self.DISPLAY, "-forever", "-nopw",
+             "-listen", "localhost", "-rfbport", str(self.VNC_PORT), "-quiet"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        self._procs.append(x11vnc)
+        time.sleep(1)
+
+        novnc_html = Path("data/novnc")
+        novnc_html.mkdir(parents=True, exist_ok=True)
+        _write_novnc_index(novnc_html, self.VNC_PORT)
+
+        websockify = subprocess.Popen(
+            ["websockify", "--web", str(novnc_html),
+             str(self.NOVNC_PORT), f"localhost:{self.VNC_PORT}"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        self._procs.append(websockify)
+        time.sleep(1)
+
+        os.environ["DISPLAY"] = self.DISPLAY
+        logger.info("noVNC stack started on port %d", self.NOVNC_PORT)
+        return self
+
+    def __exit__(self, *_):
+        for p in reversed(self._procs):
+            try:
+                p.terminate()
+            except Exception:
+                pass
+        os.environ.pop("DISPLAY", None)
+        logger.info("noVNC stack stopped")
 
 LOGIN_URL = "https://www.aliexpress.com/p/order/index.html"
 _SESSION_EXPIRED_PATTERN = re.compile(r"(passport|login)\.(aliexpress|alibaba)\.com")
@@ -133,6 +211,11 @@ class BrowserManager:
 
         await self.save_cookies()
         print("Login successful. Cookies saved to", self._cookies_path)
+
+    async def reload_cookies(self) -> None:
+        """Clear current cookies and reload from disk — call after a re-login."""
+        await self._context.clear_cookies()
+        await self.load_cookies()
 
     async def stop(self) -> None:
         if self._context:
