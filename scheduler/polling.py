@@ -41,7 +41,7 @@ class PollingScheduler:
                 orders = await self._ctx.scraper.fetch_orders(full=False)
 
                 # Apply cached recipients so we don't re-fetch detail pages
-                known = await self._ctx.store.get_recipients()
+                known = await self._ctx.store.get_enrichment_cache()
                 await self._ctx.scraper.enrich_recipients(orders, known)
 
                 changed = await self._ctx.store.get_changed(orders)
@@ -60,7 +60,7 @@ class PollingScheduler:
             for cid in self._ctx.chat_ids:
                 await self._ctx.bot.send_message(
                     cid,
-                    "⚠️ פג תוקף הסשן.\nהרץ <code>python main.py --login</code> כדי להתחבר מחדש.",
+                    "⚠️ פג תוקף הסשן.\nשלח /relogin כדי להתחבר מחדש.",
                     parse_mode="HTML",
                 )
         except CloudflareBlockError as e:

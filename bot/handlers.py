@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -27,7 +28,7 @@ BOT_COMMANDS = [
     BotCommand(command="active",  description="הזמנות פעילות — לפי שלב או נמען"),
     BotCommand(command="cached",  description="כל ההזמנות מהמסד המקומי"),
     BotCommand(command="status",  description="סטטוס הבוט"),
-    BotCommand(command="login",   description="הוראות התחברות מחדש"),
+    BotCommand(command="relogin", description="התחברות מחדש ל-AliExpress דרך הדפדפן"),
 ]
 
 
@@ -45,6 +46,7 @@ class AppContext:
         self.scrape_lock = scrape_lock
         self.scheduler = scheduler
         self.last_poll: datetime | None = None
+        self.relogin_in_progress: bool = False
 
 
 class AppContextMiddleware(BaseMiddleware):
@@ -97,7 +99,7 @@ async def cmd_update(message: Message, ctx: AppContext):
     try:
         async with ctx.scrape_lock:
             orders = await ctx.scraper.fetch_orders(full=True)
-            known = await ctx.store.get_recipients()
+            known = await ctx.store.get_enrichment_cache()
             await ctx.scraper.enrich_recipients(orders, known, fetch_completed=True)
             changed = await ctx.store.get_changed(orders)
             await ctx.store.upsert_all(orders)
@@ -295,14 +297,69 @@ async def cmd_status(message: Message, ctx: AppContext):
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
-@router.message(Command("login"))
-async def cmd_login(message: Message, ctx: AppContext):
-    await message.answer(
-        "להתחברות מחדש, הרץ על המחשב שלך:\n\n"
-        "<code>python main.py --login</code>\n\n"
-        "דרך SSH: הרץ <code>python main.py --novnc</code> לכניסה דרך הדפדפן.",
-        parse_mode="HTML",
-    )
+@router.message(Command("relogin"))
+async def cmd_relogin(message: Message, ctx: AppContext):
+    if ctx.relogin_in_progress:
+        await message.answer("⚠️ תהליך התחברות כבר פועל.")
+        return
+
+    ctx.relogin_in_progress = True
+    status_msg = await message.answer("⏳ מפעיל סשן VNC...")
+
+    async def _run():
+        import asyncio
+        from scraper.browser import BrowserManager, NoVNCStack
+
+        try:
+            # Start VNC stack in a thread (has blocking sleeps)
+            vnc = await asyncio.to_thread(NoVNCStack().__enter__)
+
+            await ctx.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                text=(
+                    "🖥 <b>סשן VNC פעיל</b>\n\n"
+                    "1. פתח מנהרת SSH:\n"
+                    "<code>ssh -L 6080:localhost:6080 user@your-server</code>\n\n"
+                    "2. פתח בדפדפן שלך:\n"
+                    "<code>http://localhost:6080/vnc.html?autoconnect=1&resize=scale</code>\n\n"
+                    "3. השלם את ההתחברות ל-AliExpress.\n"
+                    "הבוט יאשר אוטומטית כשהכניסה תצליח."
+                ),
+                parse_mode="HTML",
+            )
+
+            # Run headed login browser
+            login_mgr = BrowserManager()
+            await login_mgr.start(headless=False)
+            try:
+                await login_mgr.run_login_flow(use_stdin=False)
+            finally:
+                await login_mgr.stop()
+
+            # Tear down VNC
+            await asyncio.to_thread(vnc.__exit__, None, None, None)
+
+            # Reload cookies into the running bot's browser context
+            await ctx.scraper._browser.reload_cookies()
+
+            await ctx.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                text="✅ ההתחברות הצליחה! הבוט ממשיך לפעול.",
+            )
+
+        except Exception as e:
+            logger.error("relogin failed: %s", e)
+            await ctx.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                text=f"❌ שגיאה בהתחברות: {e}",
+            )
+        finally:
+            ctx.relogin_in_progress = False
+
+    asyncio.create_task(_run())
 
 
 def _rows_to_orders(rows: dict) -> list:

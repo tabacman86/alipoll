@@ -176,13 +176,15 @@ class OrderStateStore:
         for order in orders:
             await self.upsert(order)
 
-    async def get_recipients(self) -> dict[str, str | None]:
-        """Returns {order_id: recipient} for all stored orders."""
+    async def get_enrichment_cache(self) -> dict[str, dict]:
+        """Returns {order_id: {recipient, sub_status, item_name}} for all stored orders."""
         async with aiosqlite.connect(self._db_path) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT order_id, recipient FROM orders") as cursor:
+            async with db.execute(
+                "SELECT order_id, recipient, sub_status, item_name FROM orders"
+            ) as cursor:
                 rows = await cursor.fetchall()
-        return {row["order_id"]: row["recipient"] for row in rows}
+        return {row["order_id"]: dict(row) for row in rows}
 
     async def count(self) -> int:
         async with aiosqlite.connect(self._db_path) as db:
