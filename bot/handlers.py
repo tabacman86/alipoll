@@ -99,7 +99,7 @@ async def cmd_update(message: Message, ctx: AppContext):
     try:
         async with ctx.scrape_lock:
             orders = await ctx.scraper.fetch_orders(full=True)
-            known = await ctx.store.get_recipients()
+            known = await ctx.store.get_enrichment_cache()
             await ctx.scraper.enrich_recipients(orders, known, fetch_completed=True)
             changed = await ctx.store.get_changed(orders)
             await ctx.store.upsert_all(orders)

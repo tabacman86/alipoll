@@ -157,30 +157,39 @@ class AliExpressScraper:
         return orders
 
     async def enrich_recipients(
-        self, orders: list[Order], known: dict[str, str | None], fetch_completed: bool = False
+        self, orders: list[Order], known: dict[str, dict], fetch_completed: bool = False
     ) -> None:
-        """Fetch recipients from detail pages for orders not yet in DB. Mutates orders in place."""
+        """Fetch detail pages only for orders missing data not available on the list page.
+        known = {order_id: {recipient, sub_status, item_name}} from store.get_enrichment_cache().
+        """
+        to_fetch = []
         for order in orders:
-            needs_detail = (
-                order.recipient is None
-                or order.sub_status is None
+            cached = known.get(order.order_id, {})
+
+            # Fill from cache first
+            if not order.recipient and cached.get("recipient"):
+                order.recipient = cached["recipient"]
+            if not order.sub_status and cached.get("sub_status"):
+                order.sub_status = cached["sub_status"]
+            if order.item_name == "Unknown item" and cached.get("item_name") and cached["item_name"] != "Unknown item":
+                order.item_name = cached["item_name"]
+
+            # Only fetch detail page if something is still missing
+            still_missing = (
+                not order.recipient
+                or not order.sub_status
                 or order.item_name == "Unknown item"
             )
-            if not needs_detail:
-                if order.order_id in known and known[order.order_id]:
-                    order.recipient = known[order.order_id]
+            if not still_missing:
                 continue
-
-            if order.order_id in known and known[order.order_id] and order.item_name != "Unknown item":
-                order.recipient = known[order.order_id]
-                if order.sub_status is not None:
-                    continue
 
             if order.status.lower() == "completed" and not fetch_completed:
-                if order.order_id in known and known[order.order_id]:
-                    order.recipient = known[order.order_id]
                 continue
 
+            to_fetch.append(order)
+
+        logger.info("Enriching %d/%d orders from detail pages", len(to_fetch), len(orders))
+        for order in to_fetch:
             recipient, sub_status, item_name = await self._fetch_detail(order.order_id)
             if recipient:
                 order.recipient = recipient
